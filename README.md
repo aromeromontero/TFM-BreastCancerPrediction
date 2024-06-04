@@ -31,5 +31,4 @@ Ejemplo: C:\Users\diaro\Dataset\breast-cancer-wisconsin.csv
   - **Carpeta *Code***
     -   ARIADNAROMERO-TFM-M3-CODE.Rmd-> archivo .Rmd
     -   ARIADNAROMERO-TFM-M3-CODE.pdf-> archivo R MarkDown en pdf
-  - **ARIADNAROMERO-TFM.pdf** -> es el archivo donde se encuentran el TFM completo.
   - **LICENSE**
