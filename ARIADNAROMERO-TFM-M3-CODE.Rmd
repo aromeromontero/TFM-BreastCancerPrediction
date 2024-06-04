@@ -1,0 +1,514 @@
+---
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(scipen=999)
+```
+
+
+# Paquetes necesarios
+```{r}
+if (!require('dplyr')) 
+  install.packages('dplyr')
+library(dplyr)
+
+if (!require('scales')) 
+  install.packages('scales')
+library(scales)
+
+if (!require('gridExtra')) 
+  install.packages('gridExtra')
+library(gridExtra)
+
+if (!require('corrplot')) 
+  install.packages('corrplot')
+library(corrplot)
+
+if (!require('ggplot2')) 
+  install.packages('ggplot2')
+library(ggplot2)
+
+if (!require('caret')) 
+  install.packages('caret')
+library(caret)
+
+if (!require('car')) 
+  install.packages('car')
+library(car)
+
+if (!require('randomForest')) 
+  install.packages('randomForest')
+library(randomForest)
+
+if (!require('rpart')) 
+  install.packages('rpart')
+library(rpart)
+
+if (!require('class')) 
+  install.packages('class')
+library(class)
+
+if (!require('e1071')) 
+  install.packages('e1071')
+library(e1071)
+```
+
+# Preprocesado
+## Carga de datos
+```{r}
+data <- read.csv("C:/Users/ariad/Desktop/MASTER/6 SEM/TFM/Dataset/breast-cancer-wisconsin.csv", sep=",")
+str(data)
+```
+## Calcular estadísticas descriptivas para variables numéricas
+```{r}
+numvars_stats <- sapply(data[, sapply(data, is.numeric)], function(x) c(mean = mean(x, na.rm = TRUE),
+                                                                        sd = sd(x, na.rm = TRUE),
+                                                                        min = min(x, na.rm = TRUE),
+                                                                        max = max(x, na.rm = TRUE)))
+
+# Mostrar las estadísticas descriptivas transpuestas
+numvars_stats <- t(numvars_stats)
+colnames(numvars_stats) <- c("Mean", "SD", "Min", "Max")
+numvars_stats
+```
+## Valores nulos
+```{r}
+colSums(is.na(data))
+```
+
+## Corregir inconsistencias
+```{r}
+df <- subset(data, select = -c(X, id))
+head(df)
+```
+
+
+## Diagramas de caja y presencia de outliers
+```{r}
+# Seleccionar las 10 primeras columnas después de la variable "diagnosis"
+df_subset <- df[, 2:11]
+
+
+boxplot_by_diagnosis <- function(variable_name) {
+  ggplot(df, aes(x = diagnosis, y = !!sym(variable_name), fill = diagnosis)) +
+    geom_boxplot() +
+    labs(title = paste("Boxplot of", variable_name, "by Diagnosis"),
+         x = "Diagnosis", y = variable_name) +
+    theme_minimal()
+}
+
+# Crear una lista para almacenar todos los gráficos
+plots <- list()
+
+# Crear diagramas de caja para cada variable numérica frente a la variable "diagnosis"
+for (variable in colnames(df_subset)) {
+  plots[[variable]] <- boxplot_by_diagnosis(variable)
+}
+
+# Organizar los gráficos en una cuadrícula
+grid.arrange(grobs = plots, ncol = 3)
+```
+
+
+## Histogramas (diagramas de barras) y distribución visual
+
+```{r}
+# Función para crear histogramas
+histogram_by_diagnosis <- function(variable_name) {
+  ggplot(df, aes(x = !!sym(variable_name), fill = diagnosis)) +
+    geom_histogram(bins = 30, alpha = 0.7, position = "identity") +
+    labs(title = paste("Histogram of", variable_name, "by Diagnosis"),
+         x = variable_name, y = "Frequency") +
+    theme_minimal()
+}
+
+for (variable in colnames(df_subset)) {
+  print(histogram_by_diagnosis(variable))
+}
+```
+
+
+
+## Codificación d ela variable objetivo (Diagnosis)
+
+```{r}
+# Codificación de etiquetas
+df <- df %>%
+  mutate(diagnosis = ifelse(diagnosis == "M", 1, 0))
+
+dff <- df[, -c(1)]
+```
+
+## Matriz de correlación
+```{r}
+# Calcular la matriz de correlación
+correlation_matrix <- cor(dff)
+
+# Convertir la matriz de correlación en formato de datos largo para ggplot2
+cor_df <- reshape2::melt(correlation_matrix)
+
+# Crear el gráfico de correlación con ggplot2
+ggplot(cor_df, aes(x = Var1, y = Var2, fill = value, label = round(value, 2))) +
+  geom_tile() +
+  geom_text(color = "black", size = 2) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, limits=c(-1,1)) +
+  labs(title = "Correlation matrix", x = "", y = "") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+```
+
+
+```{r}
+# Seleccionar las 10 primeras columnas después de la variable "diagnosis"
+df_subset <- df[, 2:11]
+
+# Calcular la matriz de correlación
+correlation_matrix_subset <- cor(df_subset)
+
+# Convertir la matriz de correlación en formato de datos largo para ggplot2
+cor_df_subset <- reshape2::melt(correlation_matrix_subset)
+
+# Crear el gráfico de correlación con ggplot2
+ggplot(cor_df_subset, aes(x = Var1, y = Var2, fill = value, label = round(value, 2))) +
+  geom_tile() +
+  geom_text(color = "black", size = 2) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, limits=c(-1,1)) +
+  labs(title = "Correlation matrix (first 10 columns)", x = "", y = "") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+```
+
+
+
+## Generación de los conjuntos de entrenamiento y de test
+```{r}
+# Separar la variable independiente (X) y la variable dependiente (y)
+X <- df[, !(names(df) %in% c("diagnosis"))]
+y <- df$diagnosis
+
+# Dividir el conjunto de datos en train y test
+set.seed(123)
+trainIndex <- createDataPartition(y, p = 0.8, list = FALSE)
+x_train <- X[trainIndex, ]
+y_train <- y[trainIndex]
+x_test <- X[-trainIndex, ]
+y_test <- y[-trainIndex]
+
+# Para la normalización (Min_Max Scaling)
+min_max <- preProcess(x_train, method = c("range"))
+x_train_normalized <- predict(min_max, newdata = x_train)
+x_test_normalized <- predict(min_max, newdata = x_test)
+
+x_train_normalized_df <- as.data.frame(x_train_normalized)
+x_test_normalized_df <- as.data.frame(x_test_normalized)
+y_train_df <- as.data.frame(y_train)
+y_test_df <- as.data.frame(y_test)
+
+```
+
+
+## Regresión Logística
+```{r}
+# Logistic Regression
+logreg <- glm(y_train ~ ., family = binomial(link = "logit"), data = x_train_normalized_df)
+
+# Predicciones
+y_pred_logreg <- predict(logreg, newdata = x_test_normalized_df, type = "response")
+
+# Redondear las probabilidades a 0 o 1
+y_pred_rounded <- ifelse(y_pred_logreg >= 0.5, 1, 0)
+
+# Crear un dataframe con las predicciones redondeadas y las etiquetas verdaderas
+predictions_df_logreg <- data.frame(Predicted = y_pred_rounded, Actual = y_test_df)
+
+# Convertir las columnas a factores
+predictions_df_logreg$Predicted <- as.factor(predictions_df_logreg$Predicted)
+predictions_df_logreg$y_test <- as.factor(predictions_df_logreg$y_test)
+
+# Crear la matriz de confusión
+conf_matrix_logreg <- confusionMatrix(predictions_df_logreg$Predicted, predictions_df_logreg$y_test)
+
+conf_matrix_logreg
+```
+```{r}
+# Convertir la matriz de confusión a un dataframe
+conf_matrix_df_logreg <- as.data.frame(conf_matrix_logreg$table)
+
+# Crear el gráfico de la matriz de confusión
+ggplot(data = conf_matrix_df_logreg, aes(x = Prediction, y = Reference, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = 1) +
+  scale_fill_gradient(low = "yellow", high = "green") +
+  labs(title = "Confusion Matrix of Logistic Regression",
+       x = "Predicted",
+       y = "Actual") +
+  theme_minimal()
+```
+
+## Random Forest
+```{r}
+# Random Forest
+rf <- randomForest(x = x_train_normalized_df, y = y_train)
+
+# Predicciones
+y_pred_rf <- predict(rf, newdata = x_test_normalized_df, type = "response")
+
+# Redondear las probabilidades a 0 o 1
+y_pred_rounded <- ifelse(y_pred_rf >= 0.5, 1, 0)
+
+# Crear un dataframe con las predicciones redondeadas y las etiquetas verdaderas
+predictions_df_rf <- data.frame(Predicted = y_pred_rounded, Actual = y_test_df)
+
+# Convertir las columnas a factores
+predictions_df_rf$Predicted <- as.factor(predictions_df_rf$Predicted)
+predictions_df_rf$y_test <- as.factor(predictions_df_rf$y_test)
+
+# Crear la matriz de confusión
+conf_matrix_rf <- confusionMatrix(predictions_df_rf$Predicted, predictions_df_rf$y_test)
+
+conf_matrix_rf
+```
+```{r}
+# Convertir la matriz de confusión a un dataframe
+conf_matrix_df_rf <- as.data.frame(conf_matrix_rf$table)
+
+# Crear el gráfico de la matriz de confusión
+ggplot(data = conf_matrix_df_rf, aes(x = Prediction, y = Reference, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = 1) +
+  scale_fill_gradient(low = "yellow", high = "green") +
+  labs(title = "Confusion Matrix of Random Forest",
+       x = "Predicted",
+       y = "Actual") +
+  theme_minimal()
+```
+
+
+## Árbol de decisión
+```{r}
+# Árbol de decisión
+dt <- rpart(y_train ~ ., data = x_train_normalized_df, method = "class")
+
+# Predicciones
+y_pred_dt <- predict(dt, newdata = x_test_normalized_df, type = "class")
+
+# Crear un dataframe con las predicciones redondeadas y las etiquetas verdaderas
+predictions_df_dt <- data.frame(Predicted = y_pred_dt, Actual = y_test)
+
+# Convertir las columnas a factores
+predictions_df_dt$Predicted <- as.factor(predictions_df_dt$Predicted)
+predictions_df_dt$Actual <- as.factor(predictions_df_dt$Actual)
+
+# Crear la matriz de confusión
+conf_matrix_dt <- confusionMatrix(predictions_df_dt$Predicted, predictions_df_dt$Actual)
+
+conf_matrix_dt
+```
+
+```{r}
+# Convertir la matriz de confusión a un dataframe
+conf_matrix_df_dt <- as.data.frame(conf_matrix_dt$table)
+
+# Crear el gráfico de la matriz de confusión
+ggplot(data = conf_matrix_df_dt, aes(x = Prediction, y = Reference, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = 1) +
+  scale_fill_gradient(low = "yellow", high = "green") +
+  labs(title = "Confusion Matrix of Decision Tree",
+       x = "Predicted",
+       y = "Actual") +
+  theme_minimal()
+```
+
+## k-NN
+```{r}
+# k-NN
+# Realiza la validación cruzada
+ctrl <- trainControl(method="repeatedcv", number=10, repeats=3)
+
+knn_model <- train(x = x_train_normalized_df, y = y_train, method = "knn", trControl = ctrl, tuneLength = 20)
+
+# Muestra los resultados
+print(knn_model)
+```
+```{r}
+# k-NN
+knn <- knn(x_train_normalized_df, x_test_normalized_df, y_train, k = 5)
+
+# Crear un dataframe con las predicciones y las etiquetas verdaderas
+predictions_df_knn <- data.frame(Predicted = knn, Actual = y_test_df)
+
+# Convertir las columnas a factores
+predictions_df_knn$Predicted <- as.factor(predictions_df_knn$Predicted)
+predictions_df_knn$y_test <- as.factor(predictions_df_knn$y_test)
+
+# Crear la matriz de confusión
+conf_matrix_knn <- confusionMatrix(predictions_df_knn$Predicted, predictions_df_knn$y_test)
+
+conf_matrix_knn
+```
+
+```{r}
+# Convertir la matriz de confusión a un dataframe
+conf_matrix_df_knn <- as.data.frame(conf_matrix_knn$table)
+
+# Crear el gráfico de la matriz de confusión
+ggplot(data = conf_matrix_df_knn, aes(x = Prediction, y = Reference, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = 1) +
+  scale_fill_gradient(low = "yellow", high = "green") +
+  labs(title = "Confusion Matrix of k-Nearest Neighbors",
+       x = "Predicted",
+       y = "Actual") +
+  theme_minimal()
+```
+
+## SVM
+```{r}
+# SVM
+svm_model <- svm(y_train ~ ., data = x_train_normalized_df)
+
+# Predicciones
+y_pred_svc <- predict(svm_model, newdata = x_test_normalized_df)
+
+# Redondear las probabilidades a 0 o 1
+y_pred_rounded <- ifelse(y_pred_svc >= 0.5, 1, 0)
+
+# Crear un dataframe con las predicciones redondeadas y las etiquetas verdaderas
+predictions_df_svc <- data.frame(Predicted = y_pred_rounded, Actual = y_test_df)
+
+# Convertir las columnas a factores
+predictions_df_svc$Predicted <- as.factor(predictions_df_svc$Predicted)
+predictions_df_svc$y_test <- as.factor(predictions_df_svc$y_test)
+
+# Crear la matriz de confusión
+conf_matrix_svc <- confusionMatrix(predictions_df_svc$Predicted, predictions_df_svc$y_test)
+
+conf_matrix_svc
+```
+
+```{r}
+# Convertir la matriz de confusión a un dataframe
+conf_matrix_df_svc <- as.data.frame(conf_matrix_svc$table)
+
+# Crear el gráfico de la matriz de confusión
+ggplot(data = conf_matrix_df_svc, aes(x = Prediction, y = Reference, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = 1) +
+  scale_fill_gradient(low = "yellow", high = "green") +
+  labs(title = "Confusion Matrix of Support Vector Machine",
+       x = "Predicted",
+       y = "Actual") +
+  theme_minimal()
+```
+
+## Naïve Bayes
+```{r}
+# Naive Bayes
+nb_model <- naiveBayes(x_train_normalized_df, y_train)
+
+# Predicciones
+y_pred_nb <- predict(nb_model, newdata = x_test_normalized_df)
+
+# Crear un dataframe con las predicciones y las etiquetas verdaderas
+predictions_df_nb <- data.frame(Predicted = y_pred_nb, Actual = y_test_df)
+
+# Convertir las columnas a factores
+predictions_df_nb$Predicted <- as.factor(predictions_df_nb$Predicted)
+predictions_df_nb$y_test <- as.factor(predictions_df_nb$y_test)
+
+# Crear la matriz de confusión
+conf_matrix_nb <- confusionMatrix(predictions_df_nb$Predicted, predictions_df_nb$y_test)
+
+conf_matrix_nb
+```
+
+```{r}
+# Convertir la matriz de confusión a un dataframe
+conf_matrix_df_nb <- as.data.frame(conf_matrix_nb$table)
+
+# Crear el gráfico de la matriz de confusión
+ggplot(data = conf_matrix_df_nb, aes(x = Prediction, y = Reference, fill = Freq)) +
+  geom_tile() +
+  geom_text(aes(label = Freq), vjust = 1) +
+  scale_fill_gradient(low = "yellow", high = "green") +
+  labs(title = "Confusion Matrix of Naïve Bayes",
+       x = "Predicted",
+       y = "Actual") +
+  theme_minimal()
+```
+
+## Resultados
+```{r}
+# Crear un dataframe para almacenar todas las métricas
+results <- data.frame(
+  Model = c("Logistic Regression", "Random Forest", "Decision Tree", "k-NN", "SVM", "Naive Bayes"),
+  Accuracy = c(conf_matrix_logreg$overall["Accuracy"], conf_matrix_rf$overall["Accuracy"], 
+               conf_matrix_dt$overall["Accuracy"], conf_matrix_knn$overall["Accuracy"], 
+               conf_matrix_svc$overall["Accuracy"], conf_matrix_nb$overall["Accuracy"]),
+  Sensitivity = c(conf_matrix_logreg$byClass["Sensitivity"], conf_matrix_rf$byClass["Sensitivity"], 
+                  conf_matrix_dt$byClass["Sensitivity"], conf_matrix_knn$byClass["Sensitivity"], 
+                  conf_matrix_svc$byClass["Sensitivity"], conf_matrix_nb$byClass["Sensitivity"]),
+  Specificity = c(conf_matrix_logreg$byClass["Specificity"], conf_matrix_rf$byClass["Specificity"], 
+                  conf_matrix_dt$byClass["Specificity"], conf_matrix_knn$byClass["Specificity"], 
+                  conf_matrix_svc$byClass["Specificity"], conf_matrix_nb$byClass["Specificity"]),
+  Precision = c(conf_matrix_logreg$byClass["Precision"], conf_matrix_rf$byClass["Precision"], 
+                conf_matrix_dt$byClass["Precision"], conf_matrix_knn$byClass["Precision"], 
+                conf_matrix_svc$byClass["Precision"], conf_matrix_nb$byClass["Precision"])
+)
+
+results
+```
+
+## Visualización de resultados
+```{r}
+# Agrupar fila por métrica y modelo
+results_line <- tidyr::gather(results, Metric, Value, -Model)
+
+# Crear el gráfico de líneas
+line_plot <- ggplot(results_line, aes(x = Model, y = Value, group = Metric, color = Metric)) +
+  geom_line(size=1) +
+  geom_point(size=2) +
+  labs(title = "Model Comparison by Metrics",
+       y = "Value",
+       color = "Metrics") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10)) +
+  scale_color_manual(values = c("Accuracy" = "blue", "Sensitivity" = "green", 
+                                "Specificity" = "orange", "Precision" = "red"),
+                    labels = c("Accuracy", "Sensitivity", "Specificity", "Precision"))
+
+
+# Crear la tabla de resumen
+results_table <- tableGrob(results, rows = NULL)
+
+# Combinar gráfico
+grid = grid.arrange(line_plot, results_table, ncol = 1, heights = c(1, 1))
+
+```
+```{r}
+# Reordenar el dataframe para que las métricas aparezcan en el orden del gráfico de líneas
+results_line$Metric <- factor(results_line$Metric, levels = c("Accuracy", "Sensitivity", "Specificity", "Precision"))
+
+# Gráfico de barras
+ggplot(results_line, aes(x = Model, y = Value, fill = Metric)) +
+  geom_bar(stat = "identity", position = "dodge", size = 10) +
+  labs(title = "Model Comparison by Metrics barplot",
+       y = "Value",
+       x = "Model",
+       fill = "Metric") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10)) +
+  scale_fill_manual(values = c("Accuracy" = "blue", "Sensitivity" = "red", 
+                               "Specificity" = "green", "Precision" = "orange"))
+
+
+```
+
+
