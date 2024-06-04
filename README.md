@@ -21,14 +21,16 @@
 
 #  Ejecución
 Por tal de ejecutar el código, es necesario situarse en el directorio de la carpeta.
+
 Ejemplo: C:\Users\diaro\Dataset\breast-cancer-wisconsin.csv
 
 
 
 
 # Índice
-  - **Carpeta *Dataset***-> en esta carpeta está el archivo .csv.
+  - **Carpeta *Dataset***
+    - breast-cancer-wisconsin.csv-> archivo .csv con el conjunto de datos de estudio.
   - **Carpeta *Code***
-    -   ARIADNAROMERO-TFM-M3-CODE.Rmd-> archivo .Rmd
-    -   ARIADNAROMERO-TFM-M3-CODE.pdf-> archivo R MarkDown en pdf
+    -   ARIADNAROMERO-TFM-M3-CODE.Rmd-> archivo .Rmd.
+    -   ARIADNAROMERO-TFM-M3-CODE.pdf-> archivo R MarkDown en pdf.
   - **LICENSE**
